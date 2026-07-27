@@ -6,6 +6,7 @@ from .classifier import classify_ocr_directory, classify_text
 from .identity_detector import auto_detect_identity_cards, detect_identity_card
 from .segmenter import build_segments, create_split_pdfs
 from .ocr_refiner import refine_low_confidence_pages
+from .pipeline import process_pdf
 
 __all__ = [
     "analyze_pdf", "run_ocr", "classify_ocr_directory", "classify_text",
@@ -13,4 +14,5 @@ __all__ = [
     "auto_detect_identity_cards",
     "build_segments", "create_split_pdfs",
     "refine_low_confidence_pages",
+    "process_pdf",
 ]

@@ -3,6 +3,7 @@ from pathlib import Path
 import fitz
 import pytest
 
+import src.splitdocument.pipeline as pipeline_module
 from src.splitdocument.classifier import classify_text
 from src.splitdocument.identity_detector import (
     _face_evidence,
@@ -139,6 +140,110 @@ def test_selects_only_unknown_pages_for_visual_identity_detection() -> None:
         ]
     }
     assert select_identity_candidate_pages(report) == [1, 3]
+
+
+def test_process_pdf_orchestrates_complete_workflow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "REF.pdf"
+    source.write_bytes(b"%PDF-test")
+    calls = []
+    classification = {
+        "source_file": str(source),
+        "reference": "REF",
+        "classified_page_count": 1,
+        "pages": [
+            {
+                "page_number": 1,
+                "type": "contrat",
+                "confidence": 0.9,
+                "matched_keywords": [],
+                "candidates": [],
+            }
+        ],
+    }
+
+    monkeypatch.setattr(
+        pipeline_module,
+        "analyze_pdf",
+        lambda path: {
+            "source_file": str(source),
+            "reference": "REF",
+            "page_count": 1,
+        },
+    )
+
+    def fake_ocr(*args, **kwargs):
+        calls.append("ocr")
+        return {
+            "source_file": str(source),
+            "reference": "REF",
+            "processed_page_count": 1,
+            "pages": [],
+        }
+
+    monkeypatch.setattr(pipeline_module, "run_ocr", fake_ocr)
+    monkeypatch.setattr(
+        pipeline_module,
+        "classify_ocr_directory",
+        lambda path: calls.append("classification") or classification,
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "auto_detect_identity_cards",
+        lambda *args, **kwargs: calls.append("cin_detection")
+        or {
+            "analyzed_page_count": 0,
+            "detected_cin_count": 0,
+            "detected_pages": [],
+            "workers": 2,
+        },
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "refine_low_confidence_pages",
+        lambda *args, **kwargs: calls.append("refinement")
+        or {"candidate_count": 0, "accepted_count": 0, "pages": []},
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "build_segments",
+        lambda *args: calls.append("segmentation")
+        or {
+            "source_file": str(source),
+            "reference": "REF",
+            "page_count": 1,
+            "segment_count": 1,
+            "segments": [
+                {
+                    "type": "contrat",
+                    "pages": [1],
+                    "confidence": 0.9,
+                    "requires_review": False,
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "create_split_pdfs",
+        lambda *args: calls.append("pdf_creation")
+        or [{"type": "contrat", "pages": [1], "file": "contrat_REF.pdf"}],
+    )
+
+    report = pipeline_module.process_pdf(source, output_root=tmp_path / "output")
+
+    assert calls == [
+        "ocr",
+        "classification",
+        "cin_detection",
+        "refinement",
+        "segmentation",
+        "pdf_creation",
+    ]
+    assert report["status"] == "completed"
+    assert report["document_count"] == 1
+    assert (tmp_path / "output" / "REF" / "traitement.json").is_file()
 
 
 def test_creates_a_pdf_for_each_known_segment(tmp_path: Path) -> None:

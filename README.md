@@ -2,6 +2,16 @@
 
 Application de traitement de PDF contenant plusieurs documents mélangés.
 
+## Workflow complet
+
+```powershell
+python main.py process "samples\document.pdf"
+```
+
+Cette commande execute automatiquement l'analyse, l'OCR, la classification,
+la detection des CIN, le second OCR cible, la segmentation et la creation des
+PDF. Le rapport final est ecrit dans `output/<reference>/traitement.json`.
+
 ## Module 1 : analyse avant OCR
 
 Ce premier module vérifie le PDF, compte ses pages et détermine quelles pages

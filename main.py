@@ -15,6 +15,7 @@ from src.splitdocument.identity_detector import (
 from src.splitdocument.ocr_processor import OcrError, parse_page_selection, run_ocr
 from src.splitdocument.ocr_refiner import refine_low_confidence_pages
 from src.splitdocument.pdf_analyzer import PdfAnalysisError, analyze_pdf
+from src.splitdocument.pipeline import process_pdf
 from src.splitdocument.segmenter import build_segments, create_split_pdfs, load_identity_reports
 
 
@@ -53,6 +54,16 @@ def build_parser() -> argparse.ArgumentParser:
     refine_command = commands.add_parser("refine", help="Retry low-confidence OCR pages")
     refine_command.add_argument("ocr_dir", type=Path)
     refine_command.add_argument("--threshold", type=float, default=0.60)
+
+    process_command = commands.add_parser(
+        "process", help="Run the complete PDF processing workflow"
+    )
+    process_command.add_argument("pdf", type=Path)
+    process_command.add_argument("--output-root", type=Path, default=Path("output"))
+    process_command.add_argument("--dpi", type=int, default=300)
+    process_command.add_argument("--languages", default="fra+ara")
+    process_command.add_argument("--cin-workers", type=int, default=2)
+    process_command.add_argument("--refinement-threshold", type=float, default=0.60)
     return parser
 
 
@@ -64,6 +75,44 @@ def write_json(path: Path, data: dict) -> None:
 def main() -> int:
     args = build_parser().parse_args()
     try:
+        if args.command == "process":
+            labels = {
+                "analysis": "Analysis",
+                "ocr": "OCR",
+                "classification": "Classification",
+                "cin_detection": "CIN detection",
+                "refinement": "OCR refinement",
+                "segmentation": "Segmentation",
+                "pdf_creation": "PDF creation",
+            }
+
+            def show_progress(stage: str, status: str) -> None:
+                if stage == "ocr_page":
+                    print(f"  OCR page {status}", flush=True)
+                    return
+                print(f"[{labels.get(stage, stage)}] {status}", flush=True)
+
+            report = process_pdf(
+                args.pdf,
+                output_root=args.output_root,
+                dpi=args.dpi,
+                languages=args.languages,
+                cin_workers=args.cin_workers,
+                refinement_threshold=args.refinement_threshold,
+                progress=show_progress,
+            )
+            report_path = (
+                args.output_root.resolve()
+                / report["reference"]
+                / "traitement.json"
+            )
+            print(f"Pages processed: {report['page_count']}")
+            print(f"PDF files created: {report['document_count']}")
+            print(f"Documents requiring review: {report['review_count']}")
+            print(f"Total time: {report['durations_seconds']['total']:.2f}s")
+            print(f"Final report: {report_path}")
+            return 0
+
         if args.command == "auto-detect-cin":
             classification_path = args.ocr_dir / "classification.json"
             classification = json.loads(
