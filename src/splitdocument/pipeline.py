@@ -160,6 +160,13 @@ def process_pdf(
         "document_count": len(outputs),
         "review_count": len(reviews),
         "reviews": reviews,
+        "configuration": {
+            "dpi": dpi,
+            "languages": languages,
+            "ocr_workers": ocr_workers,
+            "cin_workers": cin_workers,
+            "refinement_threshold": refinement_threshold,
+        },
         "durations_seconds": durations,
         "documents_directory": str(documents_dir),
         "outputs": outputs,
