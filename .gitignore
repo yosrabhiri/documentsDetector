@@ -5,3 +5,6 @@ test-temp/
 output/
 samples/
 txt.txt
+runtime_uploads/
+streamlit.stdout.log
+streamlit.stderr.log

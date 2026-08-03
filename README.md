@@ -11,6 +11,18 @@ python main.py process "samples\document.pdf"
 Cette commande execute automatiquement l'analyse, l'OCR, la classification,
 la detection des CIN, le second OCR cible, la segmentation et la creation des
 PDF. Le rapport final est ecrit dans `output/<reference>/traitement.json`.
+Quatre pages sont traitees simultanement par defaut. Pour comparer ou limiter la
+charge machine, utiliser `--ocr-workers 1`, `--ocr-workers 2` ou
+`--ocr-workers 4`.
+
+## Interface de demonstration
+
+```powershell
+python -m streamlit run app.py
+```
+
+L'interface locale permet de deposer un PDF, suivre les etapes, consulter les
+documents a verifier et telecharger les fichiers separes.
 
 ## Module 1 : analyse avant OCR
 

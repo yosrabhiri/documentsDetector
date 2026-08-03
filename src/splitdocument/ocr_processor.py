@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -54,11 +55,14 @@ def run_ocr(
     dpi: int = DEFAULT_DPI,
     tesseract_path: str | Path = DEFAULT_TESSERACT_PATH,
     tessdata_dir: str | Path = Path("models/tessdata"),
+    workers: int = 1,
     on_page: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     """OCR selected pages and save one UTF-8 text file per page."""
     if dpi < 72:
         raise OcrError("DPI must be at least 72")
+    if workers < 1:
+        raise OcrError("OCR workers must be at least 1")
 
     tesseract = Path(tesseract_path).resolve()
     tessdata = Path(tessdata_dir).resolve()
@@ -83,13 +87,9 @@ def run_ocr(
         raise OcrError(f"Pages outside document range: {invalid}")
 
     destination.mkdir(parents=True, exist_ok=True)
-    page_reports = []
-    document = fitz.open(analysis["source_file"])
-    try:
-        for page_number in selected_pages:
-            if on_page:
-                on_page(page_number, len(selected_pages))
-
+    def process_page(page_number: int) -> dict[str, Any]:
+        document = fitz.open(analysis["source_file"])
+        try:
             page = document[page_number - 1]
             page_analysis = analysis["pages"][page_number - 1]
             if page_analysis["ocr_required"]:
@@ -122,27 +122,42 @@ def run_ocr(
             else:
                 text = page.get_text("text").strip()
                 method = "embedded_text"
+        finally:
+            document.close()
 
-            text_file = destination / f"page_{page_number:04d}.txt"
-            text_file.write_text(text, encoding="utf-8")
-            page_reports.append(
-                {
-                    "page_number": page_number,
-                    "method": method,
-                    "languages": languages if method == "tesseract" else None,
-                    "character_count": len(text),
-                    "text_file": text_file.name,
-                    "preview": " ".join(text.split())[:200],
-                }
-            )
-    finally:
-        document.close()
+        text_file = destination / f"page_{page_number:04d}.txt"
+        text_file.write_text(text, encoding="utf-8")
+        return {
+            "page_number": page_number,
+            "method": method,
+            "languages": languages if method == "tesseract" else None,
+            "character_count": len(text),
+            "text_file": text_file.name,
+            "preview": " ".join(text.split())[:200],
+        }
+
+    page_reports = []
+    max_workers = min(workers, max(len(selected_pages), 1))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(process_page, page_number): page_number
+            for page_number in selected_pages
+        }
+        completed = 0
+        for future in as_completed(futures):
+            page_reports.append(future.result())
+            completed += 1
+            if on_page:
+                on_page(completed, len(selected_pages))
+
+    page_reports.sort(key=lambda page: page["page_number"])
 
     return {
         "source_file": analysis["source_file"],
         "reference": analysis["reference"],
         "languages": languages,
         "dpi": dpi,
+        "workers": max_workers,
         "processed_page_count": len(page_reports),
         "pages": page_reports,
     }

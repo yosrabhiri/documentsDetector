@@ -9,7 +9,7 @@ from src.splitdocument.identity_detector import (
     _face_evidence,
     select_identity_candidate_pages,
 )
-from src.splitdocument.ocr_processor import OcrError, parse_page_selection
+from src.splitdocument.ocr_processor import OcrError, parse_page_selection, run_ocr
 from src.splitdocument.ocr_refiner import select_refinement_pages
 from src.splitdocument.pdf_analyzer import PdfAnalysisError, analyze_pdf
 from src.splitdocument.segmenter import build_segments, create_split_pdfs
@@ -140,6 +140,30 @@ def test_selects_only_unknown_pages_for_visual_identity_detection() -> None:
         ]
     }
     assert select_identity_candidate_pages(report) == [1, 3]
+
+
+def test_rejects_invalid_ocr_worker_count(tmp_path: Path) -> None:
+    with pytest.raises(OcrError, match="workers must be at least 1"):
+        run_ocr(tmp_path / "missing.pdf", tmp_path / "output", workers=0)
+
+
+def test_parallel_ocr_preserves_page_order(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "ORDER.pdf"
+    document = fitz.open()
+    for number in range(1, 4):
+        page = document.new_page()
+        page.insert_text(
+            (72, 72),
+            f"Searchable content for page number {number} with enough characters.",
+        )
+    document.save(pdf_path)
+    document.close()
+
+    report = run_ocr(pdf_path, tmp_path / "ocr", workers=2)
+
+    assert report["workers"] == 2
+    assert [page["page_number"] for page in report["pages"]] == [1, 2, 3]
+    assert all(page["method"] == "embedded_text" for page in report["pages"])
 
 
 def test_process_pdf_orchestrates_complete_workflow(

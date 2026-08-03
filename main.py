@@ -33,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     ocr_command.add_argument("--pages", help="Page selection, for example: 1,3-5")
     ocr_command.add_argument("--dpi", type=int, default=300)
     ocr_command.add_argument("--languages", default="fra+ara")
+    ocr_command.add_argument("--workers", type=int, default=4)
 
     classify_command = commands.add_parser("classify", help="Classify OCR page texts")
     classify_command.add_argument("ocr_dir", type=Path, help="Directory containing ocr.json")
@@ -62,6 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     process_command.add_argument("--output-root", type=Path, default=Path("output"))
     process_command.add_argument("--dpi", type=int, default=300)
     process_command.add_argument("--languages", default="fra+ara")
+    process_command.add_argument("--ocr-workers", type=int, default=4)
     process_command.add_argument("--cin-workers", type=int, default=2)
     process_command.add_argument("--refinement-threshold", type=float, default=0.60)
     return parser
@@ -97,6 +99,7 @@ def main() -> int:
                 output_root=args.output_root,
                 dpi=args.dpi,
                 languages=args.languages,
+                ocr_workers=args.ocr_workers,
                 cin_workers=args.cin_workers,
                 refinement_threshold=args.refinement_threshold,
                 progress=show_progress,
@@ -187,6 +190,7 @@ def main() -> int:
                 pages=selected_pages,
                 languages=args.languages,
                 dpi=args.dpi,
+                workers=args.workers,
                 on_page=lambda page, total: print(
                     f"OCR page {page} ({total} selected)...", flush=True
                 ),

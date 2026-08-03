@@ -48,6 +48,7 @@ def process_pdf(
     output_root: str | Path = Path("output"),
     dpi: int = 300,
     languages: str = "fra+ara",
+    ocr_workers: int = 4,
     cin_workers: int = 2,
     refinement_threshold: float = 0.60,
     progress: ProgressCallback | None = None,
@@ -72,6 +73,7 @@ def process_pdf(
             ocr_dir,
             languages=languages,
             dpi=dpi,
+            workers=ocr_workers,
             on_page=(
                 (lambda page, total: progress("ocr_page", f"{page}/{total}"))
                 if progress
