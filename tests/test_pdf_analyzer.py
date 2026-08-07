@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import fitz
@@ -13,6 +14,10 @@ from src.splitdocument.ocr_processor import OcrError, parse_page_selection, run_
 from src.splitdocument.ocr_refiner import select_refinement_pages
 from src.splitdocument.pdf_analyzer import PdfAnalysisError, analyze_pdf
 from src.splitdocument.segmenter import build_segments, create_split_pdfs
+from src.splitdocument.validation import (
+    evaluate_segmentation,
+    generate_validation_scenarios,
+)
 
 
 def test_detects_text_page_and_scanned_page(tmp_path: Path) -> None:
@@ -270,6 +275,52 @@ def test_process_pdf_orchestrates_complete_workflow(
     assert (tmp_path / "output" / "REF" / "traitement.json").is_file()
 
 
+def test_process_batch_keeps_successes_when_one_pdf_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = tmp_path / "REF001.pdf"
+    second = tmp_path / "REF002.pdf"
+    first.write_bytes(b"pdf")
+    second.write_bytes(b"pdf")
+
+    def fake_process(path, **kwargs):
+        reference = Path(path).stem
+        if reference == "REF002":
+            raise OcrError("OCR failed")
+        return {
+            "reference": reference,
+            "page_count": 3,
+            "document_count": 2,
+            "review_count": 0,
+            "durations_seconds": {"total": 1.2},
+            "documents_directory": str(tmp_path / reference),
+            "outputs": [],
+        }
+
+    monkeypatch.setattr(pipeline_module, "process_pdf", fake_process)
+    report = pipeline_module.process_batch(
+        [first, second], output_root=tmp_path / "output"
+    )
+
+    assert report["status"] == "partial"
+    assert report["completed_count"] == 1
+    assert report["failed_count"] == 1
+    assert report["results"][0]["reference"] == "REF001"
+    assert report["results"][1]["error_type"] == "OcrError"
+
+
+def test_process_batch_rejects_duplicate_references(tmp_path: Path) -> None:
+    first = tmp_path / "a" / "REF.pdf"
+    second = tmp_path / "b" / "REF.pdf"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_bytes(b"pdf")
+    second.write_bytes(b"pdf")
+
+    with pytest.raises(ValueError, match="Duplicate PDF references"):
+        pipeline_module.process_batch([first, second], output_root=tmp_path / "out")
+
+
 def test_creates_a_pdf_for_each_known_segment(tmp_path: Path) -> None:
     source_path = tmp_path / "REF.pdf"
     source = fitz.open()
@@ -288,3 +339,61 @@ def test_creates_a_pdf_for_each_known_segment(tmp_path: Path) -> None:
     outputs = create_split_pdfs(report, tmp_path / "documents")
     assert len(outputs) == 1
     assert fitz.open(tmp_path / "documents" / "contrat_REF.pdf").page_count == 1
+
+
+def test_evaluation_detects_merged_same_type_documents() -> None:
+    expected = {
+        "reference": "REF",
+        "segments": [
+            {"type": "contrat", "pages": [1, 2]},
+            {"type": "contrat", "pages": [3, 4]},
+            {"type": "statuts", "pages": [5]},
+        ],
+    }
+    actual = {
+        "segments": [
+            {"type": "contrat", "pages": [1, 2, 3, 4]},
+            {"type": "statuts", "pages": [5]},
+        ]
+    }
+
+    result = evaluate_segmentation(expected, actual)
+
+    assert result["page_type_accuracy"] == 1.0
+    assert result["exact_segment_rate"] < 1.0
+    assert result["boundary_recall"] == 0.5
+
+
+def test_generates_five_validation_scenarios(tmp_path: Path) -> None:
+    source_path = tmp_path / "SOURCE.pdf"
+    document = fitz.open()
+    for number in range(3):
+        page = document.new_page()
+        page.insert_text((72, 72), f"Document page {number + 1}")
+    document.save(source_path)
+    document.close()
+    segmentation_path = tmp_path / "segmentation.json"
+    segmentation_path.write_text(
+        json.dumps(
+            {
+                "segments": [
+                    {"type": "contrat", "pages": [1]},
+                    {"type": "statuts", "pages": [2]},
+                    {"type": "cin", "pages": [3]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = generate_validation_scenarios(
+        source_path, segmentation_path, tmp_path / "scenarios"
+    )
+
+    assert report["scenario_count"] == 5
+    assert all(Path(item["pdf"]).is_file() for item in report["scenarios"])
+    repeated = json.loads(
+        (tmp_path / "scenarios" / "scenario_type_repete.expected.json").read_text()
+    )
+    assert repeated["segments"][0]["type"] == "contrat"
+    assert repeated["segments"][1]["type"] == "contrat"

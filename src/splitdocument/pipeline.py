@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -17,6 +18,7 @@ from .segmenter import build_segments, create_split_pdfs
 
 
 ProgressCallback = Callable[[str, str], None]
+BatchProgressCallback = Callable[[int, int, str, str, str], None]
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
@@ -173,3 +175,85 @@ def process_pdf(
     }
     _write_json(reference_dir / "traitement.json", final_report)
     return final_report
+
+
+def process_batch(
+    pdf_paths: list[str | Path],
+    *,
+    output_root: str | Path = Path("output"),
+    ocr_workers: int = 4,
+    progress: BatchProgressCallback | None = None,
+) -> dict[str, Any]:
+    """Process multiple referenced PDFs sequentially and keep per-file failures."""
+    paths = [Path(path).resolve() for path in pdf_paths]
+    if not paths:
+        raise ValueError("At least one PDF is required")
+
+    references = [path.stem for path in paths]
+    duplicates = sorted(
+        reference for reference in set(references) if references.count(reference) > 1
+    )
+    if duplicates:
+        raise ValueError(f"Duplicate PDF references: {', '.join(duplicates)}")
+
+    started = perf_counter()
+    results = []
+    total = len(paths)
+    for index, path in enumerate(paths, start=1):
+        reference = path.stem
+
+        def document_progress(stage: str, state: str) -> None:
+            if progress:
+                progress(index, total, reference, stage, state)
+
+        try:
+            report = process_pdf(
+                path,
+                output_root=output_root,
+                ocr_workers=ocr_workers,
+                progress=document_progress,
+            )
+        except Exception as exc:
+            results.append(
+                {
+                    "reference": reference,
+                    "status": "failed",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            )
+            if progress:
+                progress(index, total, reference, "document", "failed")
+            continue
+
+        results.append(
+            {
+                "reference": reference,
+                "status": "completed",
+                "page_count": report["page_count"],
+                "document_count": report["document_count"],
+                "review_count": report["review_count"],
+                "duration_seconds": report["durations_seconds"]["total"],
+                "documents_directory": report["documents_directory"],
+                "outputs": report["outputs"],
+            }
+        )
+        if progress:
+            progress(index, total, reference, "document", "completed")
+
+    completed = sum(result["status"] == "completed" for result in results)
+    failed = len(results) - completed
+    status = "completed" if failed == 0 else "partial" if completed else "failed"
+    report = {
+        "status": status,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "input_count": total,
+        "completed_count": completed,
+        "failed_count": failed,
+        "total_duration_seconds": round(perf_counter() - started, 2),
+        "configuration": {"ocr_workers_per_pdf": ocr_workers},
+        "results": results,
+    }
+    batch_dir = Path(output_root).resolve() / "batches"
+    _write_json(batch_dir / "latest_batch.json", report)
+    return report

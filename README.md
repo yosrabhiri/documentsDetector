@@ -24,6 +24,23 @@ python -m streamlit run app.py
 L'interface locale permet de deposer un PDF, suivre les etapes, consulter les
 documents a verifier et telecharger les fichiers separes.
 
+Le mode `Traitement par lot` accepte plusieurs PDF ou un dossier complet. Chaque
+nom de fichier est utilise comme reference et recoit son propre dossier de sortie.
+
+## Validation locale
+
+```powershell
+python main.py generate-scenarios "samples\document.pdf" `
+  "output\REFERENCE\segmentation.json"
+```
+
+Les scenarios confidentiels sont crees sous `validation_runs/`, dossier ignore
+par Git. Une execution peut ensuite etre evaluee avec :
+
+```powershell
+python main.py evaluate attendu.json segmentation.json
+```
+
 ## Module 1 : analyse avant OCR
 
 Ce premier module vérifie le PDF, compte ses pages et détermine quelles pages

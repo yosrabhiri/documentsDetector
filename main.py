@@ -15,8 +15,12 @@ from src.splitdocument.identity_detector import (
 from src.splitdocument.ocr_processor import OcrError, parse_page_selection, run_ocr
 from src.splitdocument.ocr_refiner import refine_low_confidence_pages
 from src.splitdocument.pdf_analyzer import PdfAnalysisError, analyze_pdf
-from src.splitdocument.pipeline import process_pdf
+from src.splitdocument.pipeline import process_batch, process_pdf
 from src.splitdocument.segmenter import build_segments, create_split_pdfs, load_identity_reports
+from src.splitdocument.validation import (
+    evaluate_report_files,
+    generate_validation_scenarios,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -66,6 +70,30 @@ def build_parser() -> argparse.ArgumentParser:
     process_command.add_argument("--ocr-workers", type=int, default=4)
     process_command.add_argument("--cin-workers", type=int, default=2)
     process_command.add_argument("--refinement-threshold", type=float, default=0.60)
+
+    batch_command = commands.add_parser(
+        "process-batch", help="Process multiple referenced PDFs"
+    )
+    batch_command.add_argument("pdfs", nargs="*", type=Path)
+    batch_command.add_argument("--folder", type=Path)
+    batch_command.add_argument("--output-root", type=Path, default=Path("output"))
+    batch_command.add_argument("--ocr-workers", type=int, default=4)
+
+    scenarios_command = commands.add_parser(
+        "generate-scenarios", help="Generate local validation PDFs"
+    )
+    scenarios_command.add_argument("pdf", type=Path)
+    scenarios_command.add_argument("segmentation", type=Path)
+    scenarios_command.add_argument(
+        "--output", type=Path, default=Path("validation_runs/scenarios")
+    )
+
+    evaluate_command = commands.add_parser(
+        "evaluate", help="Compare expected and actual segmentation"
+    )
+    evaluate_command.add_argument("expected", type=Path)
+    evaluate_command.add_argument("actual", type=Path)
+    evaluate_command.add_argument("--output", type=Path)
     return parser
 
 
@@ -77,6 +105,51 @@ def write_json(path: Path, data: dict) -> None:
 def main() -> int:
     args = build_parser().parse_args()
     try:
+        if args.command == "generate-scenarios":
+            report = generate_validation_scenarios(
+                args.pdf, args.segmentation, args.output
+            )
+            print(f"Scenarios created: {report['scenario_count']}")
+            for scenario in report["scenarios"]:
+                print(f"{scenario['name']}: {scenario['page_count']} pages")
+            return 0
+
+        if args.command == "evaluate":
+            report = evaluate_report_files(args.expected, args.actual, args.output)
+            print(f"Page type accuracy: {report['page_type_accuracy']:.1%}")
+            print(f"Exact segments: {report['exact_segment_rate']:.1%}")
+            print(f"Boundary F1: {report['boundary_f1']:.1%}")
+            return 0
+
+        if args.command == "process-batch":
+            if args.folder and args.pdfs:
+                raise ValueError("Use PDF paths or --folder, not both")
+            pdf_paths = args.pdfs
+            if args.folder:
+                if not args.folder.is_dir():
+                    raise ValueError(f"Folder not found: {args.folder}")
+                pdf_paths = sorted(args.folder.glob("*.pdf"))
+
+            def show_batch_progress(
+                index: int, total: int, reference: str, stage: str, state: str
+            ) -> None:
+                if stage == "ocr_page":
+                    print(f"[{index}/{total}] {reference} · OCR {state}", flush=True)
+                elif state == "started":
+                    print(f"[{index}/{total}] {reference} · {stage}", flush=True)
+
+            report = process_batch(
+                pdf_paths,
+                output_root=args.output_root,
+                ocr_workers=args.ocr_workers,
+                progress=show_batch_progress,
+            )
+            print(f"PDF inputs: {report['input_count']}")
+            print(f"Completed: {report['completed_count']}")
+            print(f"Failed: {report['failed_count']}")
+            print(f"Total time: {report['total_duration_seconds']:.2f}s")
+            return 0 if report["failed_count"] == 0 else 2
+
         if args.command == "process":
             labels = {
                 "analysis": "Analysis",

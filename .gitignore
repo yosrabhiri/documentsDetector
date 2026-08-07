@@ -8,3 +8,4 @@ txt.txt
 runtime_uploads/
 streamlit.stdout.log
 streamlit.stderr.log
+validation_runs/
