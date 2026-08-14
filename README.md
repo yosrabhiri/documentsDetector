@@ -6,15 +6,6 @@ Elle prend en charge un PDF unique ou un lot de PDF, avec OCR français-arabe.
 
 ## Prérequis
 
-- Windows 10 ou 11
-- Python 3.11 ou plus récent
-- Tesseract OCR installé dans :
-  `C:\Program Files\Tesseract-OCR\tesseract.exe`
-- Git, uniquement pour cloner le dépôt
-
-Les modèles Tesseract français et arabe sont déjà présents dans
-`models/tessdata/`.
-
 Vérifier les installations dans PowerShell :
 
 ```powershell
