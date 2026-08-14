@@ -1,129 +1,198 @@
 # SplitDocument
 
-Application de traitement de PDF contenant plusieurs documents mélangés.
+Application locale qui analyse des PDF numérisés contenant plusieurs documents,
+reconnaît leur type et crée un fichier PDF séparé pour chaque document détecté.
+Elle prend en charge un PDF unique ou un lot de PDF, avec OCR français-arabe.
 
-## Workflow complet
+## Prérequis
+
+- Windows 10 ou 11
+- Python 3.11 ou plus récent
+- Tesseract OCR installé dans :
+  `C:\Program Files\Tesseract-OCR\tesseract.exe`
+- Git, uniquement pour cloner le dépôt
+
+Les modèles Tesseract français et arabe sont déjà présents dans
+`models/tessdata/`.
+
+Vérifier les installations dans PowerShell :
 
 ```powershell
-python main.py process "samples\document.pdf"
+python --version
+git --version
+& "C:\Program Files\Tesseract-OCR\tesseract.exe" --version
 ```
 
-Cette commande execute automatiquement l'analyse, l'OCR, la classification,
-la detection des CIN, le second OCR cible, la segmentation et la creation des
-PDF. Le rapport final est ecrit dans `output/<reference>/traitement.json`.
-Quatre pages sont traitees simultanement par defaut. Pour comparer ou limiter la
-charge machine, utiliser `--ocr-workers 1`, `--ocr-workers 2` ou
-`--ocr-workers 4`.
+## Installation
 
-## Interface de demonstration
+Cloner le dépôt et entrer dans le projet :
+
+```powershell
+git clone https://github.com/yosrabhiri/documentsDetector.git
+cd documentsDetector
+```
+
+Créer puis activer un environnement Python isolé :
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+Installer les dépendances :
+
+```powershell
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Si PowerShell refuse l'activation de l'environnement, exécuter une fois dans la
+même fenêtre :
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+## Lancer l'interface
+
+Depuis la racine du projet :
 
 ```powershell
 python -m streamlit run app.py
 ```
 
-L'interface locale permet de deposer un PDF, suivre les etapes, consulter les
-documents a verifier et telecharger les fichiers separes.
+Ouvrir ensuite `http://127.0.0.1:8501` dans le navigateur. Le terminal doit
+rester ouvert pendant l'utilisation. Pour arrêter le serveur, utiliser `Ctrl+C`.
 
-Le mode `Traitement par lot` accepte plusieurs PDF ou un dossier complet. Chaque
-nom de fichier est utilise comme reference et recoit son propre dossier de sortie.
+L'interface propose deux workflows :
 
-## Validation locale
+- `Un PDF` : traiter et télécharger les documents extraits d'un seul PDF.
+- `Traitement par lot` : sélectionner plusieurs PDF ou un dossier complet.
 
-```powershell
-python main.py generate-scenarios "samples\document.pdf" `
-  "output\REFERENCE\segmentation.json"
+Dans un lot, le nom de chaque PDF devient sa référence. Deux fichiers portant le
+même nom ne peuvent donc pas être traités dans le même lot.
+
+## Résultats
+
+Chaque référence reçoit son propre dossier :
+
+```text
+output/
+└── REFERENCE/
+    ├── ocr/
+    │   ├── page_0001.txt
+    │   ├── ocr.json
+    │   └── classification.json
+    ├── documents/
+    │   ├── contrat_REFERENCE.pdf
+    │   ├── cin_REFERENCE.pdf
+    │   └── statuts_REFERENCE.pdf
+    ├── analysis.json
+    ├── cin_detection.json
+    ├── segmentation.json
+    └── traitement.json
 ```
 
-Les scenarios confidentiels sont crees sous `validation_runs/`, dossier ignore
-par Git. Une execution peut ensuite etre evaluee avec :
+- `ocr/` contient le texte extrait et la classification de chaque page.
+- `documents/` contient les PDF séparés finaux.
+- `analysis.json` décrit les pages et indique celles qui nécessitent un OCR.
+- `cin_detection.json` contient les résultats de détection des CIN.
+- `segmentation.json` décrit les groupes de pages détectés.
+- `traitement.json` est le rapport final avec les durées et alertes de révision.
+
+Les entrées confidentielles, résultats et fichiers temporaires sont ignorés par
+Git et ne sont pas publiés dans le dépôt.
+
+## Ligne de commande
+
+Traiter un PDF de bout en bout :
 
 ```powershell
-python main.py evaluate attendu.json segmentation.json
+python main.py process "C:\chemin\REFERENCE.pdf"
 ```
 
-## Module 1 : analyse avant OCR
-
-Ce premier module vérifie le PDF, compte ses pages et détermine quelles pages
-nécessitent un OCR. Une page est considérée comme scannée lorsqu'elle contient
-moins de 20 caractères textuels utiles.
-
-### Installation
+Traiter tous les PDF d'un dossier :
 
 ```powershell
-python -m pip install -r requirements.txt
+python main.py process-batch --folder "C:\chemin\dossier"
 ```
 
-Pour contribuer au projet et lancer les tests :
+Traiter une liste précise :
+
+```powershell
+python main.py process-batch "C:\docs\REF001.pdf" "C:\docs\REF002.pdf"
+```
+
+Quatre pages sont traitées simultanément par défaut. Pour réduire la charge :
+
+```powershell
+python main.py process "C:\chemin\REFERENCE.pdf" --ocr-workers 2
+```
+
+## Commandes par module
+
+Analyser un PDF avant OCR :
+
+```powershell
+python main.py analyze "C:\chemin\REFERENCE.pdf"
+```
+
+Extraire le texte français-arabe de toutes les pages ou d'une sélection :
+
+```powershell
+python main.py ocr "C:\chemin\REFERENCE.pdf"
+python main.py ocr "C:\chemin\REFERENCE.pdf" --pages 1,3-5
+```
+
+Classifier les textes OCR, améliorer les pages peu fiables et créer les PDF :
+
+```powershell
+python main.py classify "output\REFERENCE\ocr"
+python main.py refine "output\REFERENCE\ocr"
+python main.py split "output\REFERENCE\ocr"
+```
+
+Détecter une CIN sur une page précise ou automatiquement parmi les pages
+inconnues :
+
+```powershell
+python main.py detect-cin "C:\chemin\REFERENCE.pdf" --page 12
+python main.py auto-detect-cin "C:\chemin\REFERENCE.pdf" "output\REFERENCE\ocr"
+```
+
+## Validation et tests
+
+Installer les dépendances de développement puis lancer les tests :
 
 ```powershell
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-### Exécution
+Créer des variantes locales d'un PDF déjà segmenté :
 
 ```powershell
-python main.py analyze "samples\EXPERT TRAVEL SERVICES ( DOC JUR ).pdf"
+python main.py generate-scenarios "C:\chemin\REFERENCE.pdf" `
+  "output\REFERENCE\segmentation.json"
 ```
 
-Le rapport est créé dans `output/<reference>/analysis.json`. Il contient les
-dimensions, le nombre d'images, la quantité de texte et la décision OCR pour
-chaque page.
-
-## Module 2 : OCR francais-arabe
-
-Tesseract traite localement les pages sans texte avec les modeles `fra+ara`.
+Comparer une segmentation obtenue avec le résultat attendu :
 
 ```powershell
-python main.py ocr "samples\EXPERT TRAVEL SERVICES ( DOC JUR ).pdf"
+python main.py evaluate attendu.json segmentation.json
 ```
 
-Pour tester seulement quelques pages :
+Les scénarios sont créés dans `validation_runs/`, qui est ignoré par Git.
 
-```powershell
-python main.py ocr "samples\EXPERT TRAVEL SERVICES ( DOC JUR ).pdf" --pages 1,32,36
-```
+## Dépannage
 
-Les textes et le rapport sont enregistres dans `output/<reference>/ocr/`.
-
-## Module 3 : classification des pages
-
-```powershell
-python main.py classify "output\EXPERT TRAVEL SERVICES ( DOC JUR )\ocr"
-```
-
-La classification est independante de l'ordre des documents et fournit les
-mots-cles trouves ainsi qu'un score de confiance.
-
-### Detection recto-verso d'une CIN
-
-```powershell
-python main.py detect-cin "samples\document.pdf" --page 12
-```
-
-Le rapport indique uniquement les faces, les indices techniques et la
-confiance. Il ne conserve ni texte OCR brut, ni nom, ni numero d'identite.
-
-Pour rechercher automatiquement les CIN parmi toutes les pages inconnues :
-
-```powershell
-python main.py auto-detect-cin "samples\document.pdf" "output\REFERENCE\ocr"
-```
-
-## Module 4 : segmentation et creation des PDF
-
-```powershell
-python main.py split "output\EXPERT TRAVEL SERVICES ( DOC JUR )\ocr"
-```
-
-Les documents sont crees dans `output/<reference>/documents/`. Les segments
-inconnus ne sont pas exportes; les faibles confiances sont exportees et signalees.
-
-### Second OCR cible
-
-```powershell
-python main.py refine "output\EXPERT TRAVEL SERVICES ( DOC JUR )\ocr"
-```
-
-Seules les classifications connues sous le seuil de confiance sont retraitees.
-Le texte est remplace uniquement si le type reste identique et le score augmente.
+- `Tesseract executable not found` : installer Tesseract dans le chemin indiqué
+  dans les prérequis.
+- Port `8501` occupé : lancer
+  `python -m streamlit run app.py --server.port 8502` puis ouvrir
+  `http://127.0.0.1:8502`.
+- Deux fichiers ont le même nom : supprimer le doublon ou renommer l'un des PDF
+  avant de relancer le lot.
+- Pour les PDF volumineux, vérifier que le fichier ne dépasse pas la limite
+  d'import de 500 Mo configurée dans `.streamlit/config.toml`.
